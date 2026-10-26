@@ -74,12 +74,10 @@ ol.lb b{font-family:ui-monospace,Menlo,monospace}
   <div class="card">
     <label for="nm">Your name</label>
     <input id="nm" maxlength="14" placeholder="Player">
+    <label>Grid size</label>
+    <div class="seg" id="size"><button data-s="5">5×5</button><button data-s="10">10×10</button><button data-s="15">15×15</button></div>
     <label>Difficulty</label>
-    <div class="seg" id="diff">
-      <button data-d="E">Easy<span>5×5</span></button>
-      <button data-d="M">Medium<span>10×10</span></button>
-      <button data-d="H">Hard<span>15×15</span></button>
-    </div>
+    <div class="seg" id="lvl"><button data-l="E">Easy</button><button data-l="M">Medium</button><button data-l="H">Hard</button></div>
     <label for="cd2">Duel code (same for both friends)</label>
     <input id="cd2" class="code" maxlength="10" autocomplete="off">
     <div class="row">
@@ -88,12 +86,12 @@ ol.lb b{font-family:ui-monospace,Menlo,monospace}
       <button id="solo" class="grow">Start now (solo)</button>
     </div>
     <div class="row"><button id="sync" class="p grow">Sync start for duel</button></div>
-    <p class="small">Both friends pick the same difficulty and code (or just open the invite link), then press Sync start. The race begins for both at the next :00 or :30 on the clock. When either of you finishes, the other sees it right away.</p>
+    <p class="small">Both friends pick the same size, difficulty and code (or just open the invite link), then press Sync start. The race starts automatically as soon as both players have joined. When either of you finishes, the other sees it right away.</p>
   </div>
 </section>
 
 <section id="cd" class="card hidden">
-  <div class="small">Race starts in</div>
+  <div class="small" id="cdl">Race starts in</div>
   <div id="cdn">3</div>
   <div class="row" style="justify-content:center"><button id="cancel">Cancel</button></div>
 </section>
@@ -109,7 +107,7 @@ ol.lb b{font-family:ui-monospace,Menlo,monospace}
     <button id="un" disabled>↶ Undo</button>
   </div>
   <div class="tools"><button class="vote">⟳ Vote new map</button></div>
-  <p class="small" style="text-align:center">Drag to paint. Right-click also marks. Tap a filled or ✕ square again to clear it, or press Undo (Z). The puzzle is solved once every row and column matches its clues. In a duel, the puzzle changes once both players vote for a new map.</p>
+  <p class="small" style="text-align:center">Drag to paint. Right-click also marks. Tap a filled or ✕ square again to clear it; Fill and ✕ overwrite each other, or press Undo (Z). The puzzle is solved once every row and column matches its clues. In a duel, the puzzle changes once both players vote for a new map.</p>
 </section>
 
 <section id="result" class="card hidden">
@@ -123,7 +121,7 @@ ol.lb b{font-family:ui-monospace,Menlo,monospace}
 
 <script>
 (function(){
-let N=10,diff="M";const SIZES={E:5,M:10,H:15};
+let N=10,sz=10,lv="M",diff="10M",started=false,first=true;
 const $=id=>document.getElementById(id);
 let sol,rowC,colC,pl,tool=1,mist=0,t0=0,tick=null,playing=false,syncT=null,code="",pname="";
 let others={},myMs=0,muted=false,actx=null;
@@ -163,27 +161,31 @@ function solveLine(clue,line){
   }
  })(0,0);
  return res}
-function solvable(g,rc,cc){
- const s=Array.from({length:N},()=>Array(N).fill(-1));let ch=true;
- while(ch){ch=false;
+const LV={E:[.6,.8,1],M:[.5,.62,3],H:[.4,.52,5]};
+function solvable(rc,cc){
+ const s=Array.from({length:N},()=>Array(N).fill(-1));let ch=true,p=0;
+ while(ch){ch=false;p++;
   for(let k=0;k<2*N;k++){
    const isR=k<N,i=isR?k:k-N;
    const line=isR?s[i].slice():s.map(r=>r[i]);
    const res=solveLine(isR?rc[i]:cc[i],line);
-   if(!res)return false;
+   if(!res)return 0;
    for(let j=0;j<N;j++)if(res[j]!==-1&&line[j]===-1){ch=true;if(isR)s[i][j]=res[j];else s[j][i]=res[j]}
   }}
- return s.every(r=>r.every(v=>v!==-1))}
+ return s.every(r=>r.every(v=>v!==-1))?p:0}
 function gen(seed){
- const R=mk(hashSeed(diff+":"+seed));let g,rc,cc;
- for(let a=0;a<400;a++){
-  const d=(N===5?.5:.52)+R()*.14;
-  g=Array.from({length:N},()=>Array.from({length:N},()=>R()<d?1:0));
-  rc=g.map(runs);cc=[...Array(N)].map((_,c)=>runs(g.map(r=>r[c])));
+ const R=mk(hashSeed(diff+":"+seed)),[lo,hi,mp0]=LV[lv],mp=Math.max(1,Math.round(mp0*(N===5?.6:N===15?1.4:1)));
+ let pick=null,best=null,bp=0,last=null;
+ for(let a=0;a<(N>10?150:300)&&!pick;a++){
+  const d=lo+R()*(hi-lo);
+  let g=Array.from({length:N},()=>Array.from({length:N},()=>R()<d?1:0));
+  if(N>5)g=g.map((row,r)=>row.map((v,c)=>{let t=v*2,n=2;[[0,1],[1,0],[0,-1],[-1,0]].forEach(([dr,dc])=>{const x=g[r+dr]&&g[r+dr][c+dc];if(x!==undefined){t+=x;n++}});return t/n>.5?1:0}));
+  const rc=g.map(runs),cc=[...Array(N)].map((_,c)=>runs(g.map(r=>r[c])));
+  last={g,rc,cc};
   if(rc.some(x=>!x.length)||cc.some(x=>!x.length))continue;
-  if(solvable(g,rc,cc))break}
- return{g,rc,cc}}
-
+  const p=solvable(rc,cc);
+  if(p>=mp)pick=last;else if(p&&p>bp){bp=p;best=last}}
+ return pick||best||last}
 function build(){
  const b=$("board");b.innerHTML="";b.style.setProperty("--n",N);
  b.style.setProperty("--c","min("+(N>10?26:N<10?44:32)+"px,calc((100vw - "+(N>10?130:110)+"px)/"+N+"))");
@@ -203,11 +205,11 @@ function lineDone(){
  if(n>doneN&&!all)sfx.line();doneN=n;return all}
 let doneN=0;
 function fmt(ms){const t=Math.floor(ms/100),s=Math.floor(t/10),m=Math.floor(s/60);return m+":"+String(s%60).padStart(2,"0")+"."+(t%10)}
-function upd(){$("tm").textContent=fmt(performance.now()-t0);$("ms").textContent={E:"Easy",M:"Medium",H:"Hard"}[diff]+" · "+N+"×"+N}
+function upd(){$("tm").textContent=fmt(performance.now()-t0);$("ms").textContent={E:"Easy",M:"Medium",H:"Hard"}[lv]+" · "+N+"×"+N}
 
 function apply(r,c,v){
  const cur=pl[r][c];
- if(v===cur||(v!==0&&cur!==0))return;
+ if(v===cur)return;
  pl[r][c]=v;rec(r,c,cur);(v===1?sfx.fill:v===2?sfx.mark:sfx.clear)();
  paint(r,c);checkWin()}
 function rec(r,c,prev){const s=hist[hist.length-1];if(s)s.push([r,c,prev]);$("un").disabled=false}
@@ -230,7 +232,7 @@ bd.addEventListener("pointerdown",e=>{
 bd.addEventListener("pointermove",e=>{
  if(drag===null||!playing)return;const k=target(e);if(!k)return;
  const r=+k.dataset.r,c=+k.dataset.c;
- if(drag===0&&pl[r][c]!==dragFrom)return;if(drag!==0&&pl[r][c]!==0)return;apply(r,c,drag)});
+ if(drag===0&&pl[r][c]!==dragFrom)return;apply(r,c,drag)});
 addEventListener("pointerup",()=>drag=null);
 addEventListener("pointercancel",()=>drag=null);
 bd.addEventListener("contextmenu",e=>e.preventDefault());
@@ -243,8 +245,8 @@ addEventListener("keydown",e=>{if(e.target.tagName==="INPUT")return;
 
 function show(id){["lobby","cd","game","result"].forEach(s=>$(s).classList.toggle("hidden",s!==id))}
 function begin(){
- const p=gen(round?code+"#"+round:code);sol=p.g;rowC=p.rc;colC=p.cc;
- N=SIZES[diff];pl=Array.from({length:N},()=>Array(N).fill(0));doneN=0;hist=[];others={};myMs=0;$("opp").textContent="";$("un").disabled=true;build();lineDone();setTool(1);
+ N=sz;const p=gen(round?code+"#"+round:code);sol=p.g;rowC=p.rc;colC=p.cc;
+ pl=Array.from({length:N},()=>Array(N).fill(0));doneN=0;hist=[];others={};myMs=0;$("opp").textContent="";$("un").disabled=true;build();lineDone();setTool(1);
  clearTimeout(switching);switching=null;voted=false;votes=0;$("vs").textContent="";voteUI();
  show("game");t0=performance.now();playing=true;upd();sfx.go();
  clearInterval(tick);tick=setInterval(upd,100)}
@@ -304,30 +306,46 @@ function ready(){
  pname=($("nm").value.trim()||"Player").replace(/\|/g,"");
  code=$("cd2").value.trim().toUpperCase().replace(/[^A-Z0-9]/g,"")||"SOLO";
  $("cd2").value=code;try{history.replaceState(null,"","#"+code+"-"+diff)}catch(e){}}
-function setDiff(d){diff=SIZES[d]?d:"M";document.querySelectorAll("#diff button").forEach(b=>b.classList.toggle("on",b.dataset.d===diff));try{localStorage.setItem("diff",diff)}catch(e){}}
-document.querySelectorAll("#diff button").forEach(b=>b.onclick=()=>setDiff(b.dataset.d));
+function setDiff(z,l){sz=[5,10,15].includes(+z)?+z:10;lv=LV[l]?l:"M";diff=sz+lv;
+ document.querySelectorAll("#size button").forEach(b=>b.classList.toggle("on",+b.dataset.s===sz));
+ document.querySelectorAll("#lvl button").forEach(b=>b.classList.toggle("on",b.dataset.l===lv));
+ try{localStorage.setItem("diff",diff)}catch(e){}}
+document.querySelectorAll("#size button").forEach(b=>b.onclick=()=>setDiff(b.dataset.s,lv));
+document.querySelectorAll("#lvl button").forEach(b=>b.onclick=()=>setDiff(sz,b.dataset.l));
 $("mute").onclick=()=>{muted=!muted;$("mute").textContent=muted?"🔇":"🔊";try{localStorage.setItem("muted",muted?"1":"")}catch(e){}};
 $("inv").onclick=()=>{const c=$("cd2").value.trim().toUpperCase().replace(/[^A-Z0-9]/g,"");if(!c)return;const u=location.origin+location.pathname+"#"+c+"-"+diff;
  try{navigator.clipboard.writeText(u)}catch(e){}$("inv").textContent="Link copied";setTimeout(()=>$("inv").textContent="Copy invite link",1400)};
 function rcode(){const a="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";let s="";for(let i=0;i<5;i++)s+=a[Math.floor(Math.random()*a.length)];return s}
 $("rnd").onclick=()=>$("cd2").value=rcode();
 $("solo").onclick=()=>{ready();stopPoll();duel=false;round=0;begin()};
-$("sync").onclick=()=>{
- ready();const target=Math.ceil((Date.now()+3000)/30000)*30000;show("cd");
- clearInterval(syncT);stopPoll();duel=true;round=0;
- // Join whichever puzzle round this duel code is currently on
- api().then(s=>{if(s&&typeof s.round==="number")round=s.round;startPoll()});
- const f=()=>{const left=target-Date.now();
-  if(left<=0){clearInterval(syncT);begin();return}
+function startCountdown(at){
+ started=true;clearInterval(syncT);$("cdl").textContent="Race starts in";
+ const f=()=>{const left=at-Date.now();
+  if(left<=0){clearInterval(syncT);startPoll();begin();return}
   const n=Math.ceil(left/1000);if($("cdn").textContent!==String(n)&&n<=3)sfx.tick();$("cdn").textContent=n};
- f();syncT=setInterval(f,100)};
-$("cancel").onclick=()=>{clearInterval(syncT);stopPoll();show("lobby")};
+ f();syncT=setInterval(f,100)}
+function lobby(s){
+ if(s)handle(s);
+ if(started)return;
+ if(first){first=false;
+  if(!s||!Array.isArray(s.players)){ // server can't report players: shared-clock start every 10s
+   $("cdl").textContent="Race starts in";startCountdown(Math.ceil((Date.now()+3000)/10000)*10000);return}}
+ if(s&&Array.isArray(s.players)&&s.players.length>=2)
+  startCountdown(s.startAt?Date.now()+(s.startAt-(s.now||Date.now())):Date.now()+3000)}
+const joinMsg=()=>({method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({code:key(),player:pid,round,join:true,name:pname})});
+$("sync").onclick=async()=>{
+ ready();show("cd");clearInterval(syncT);stopPoll();duel=true;round=0;started=false;first=true;
+ $("cdl").textContent="Waiting for your friend to join…";$("cdn").textContent="…";
+ const s0=await api();if(s0&&typeof s0.round==="number")round=s0.round;
+ lobby(await api(joinMsg()));
+ if(!started)poll=setInterval(async()=>{if(!started)lobby(await api(joinMsg()))},1000)};
+$("cancel").onclick=()=>{clearInterval(syncT);stopPoll();started=false;show("lobby")};
 $("again").onclick=()=>{stopPoll();show("lobby")};
 
 const hp=location.hash.replace(/^#/,"").toUpperCase().split("-"),h=(hp[0]||"").replace(/[^A-Z0-9]/g,"");
 $("cd2").value=h?h.slice(0,10):rcode();
 let sd="M";try{sd=localStorage.getItem("diff")||"M";muted=!!localStorage.getItem("muted");$("mute").textContent=muted?"🔇":"🔊"}catch(e){}
-setDiff(SIZES[hp[1]]?hp[1]:sd);
+const hm=/^(5|10|15)([EMH])$/.exec(hp[1]||"")||/^(5|10|15)([EMH])$/.exec(sd)||[0,10,"M"];setDiff(hm[1],hm[2]);
 try{$("nm").value=""}catch(e){}
 })();
 </script>
